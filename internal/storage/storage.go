@@ -569,8 +569,13 @@ func categoryOrder(c Category) int {
 
 // --- Helpers ---
 
-func (s *Store) notePath(project string, category Category, name string) string {
+// NotePath returns the full path to a note file on disk.
+func (s *Store) NotePath(project string, category Category, name string) string {
 	return filepath.Join(s.Root, project, string(category), name+".md")
+}
+
+func (s *Store) notePath(project string, category Category, name string) string {
+	return s.NotePath(project, category, name)
 }
 
 // sanitizeName cleans up a project name: lowercase, replace spaces with hyphens,

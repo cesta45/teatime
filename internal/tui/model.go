@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"os"
+	"os/exec"
+
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -67,6 +70,9 @@ type Model struct {
 	statusMsg string
 	statusErr bool
 
+	// External editor configuration
+	externalEditor string
+
 	// Error state
 	err error
 }
@@ -100,13 +106,25 @@ func NewModel(store *storage.Store) Model {
 	editTa.SetWidth(60)
 	editTa.SetHeight(15)
 
+	editor := os.Getenv("TEATIME_EDITOR")
+	if editor == "" {
+		editor = os.Getenv("EDITOR")
+	}
+	if editor == "" {
+		// Fallback to 'hx' if it's in the PATH, otherwise we'll just use the internal editor
+		if _, err := exec.LookPath("hx"); err == nil {
+			editor = "hx"
+		}
+	}
+
 	return Model{
-		store:        store,
-		screen:       screenProjectList,
-		width:        defaultTerminalWidth,
-		height:       defaultTerminalHeight,
-		newNameInput: ta,
-		editTextarea: editTa,
+		store:          store,
+		screen:         screenProjectList,
+		width:          defaultTerminalWidth,
+		height:         defaultTerminalHeight,
+		newNameInput:   ta,
+		editTextarea:   editTa,
+		externalEditor: editor,
 	}
 }
 
@@ -284,6 +302,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.creatingNew = false
 		}
 		return m, m.loadProjects
+
+	case editorFinishedMsg:
+		if msg.err != nil {
+			m.statusMsg = "Editor error: " + msg.err.Error()
+			m.statusErr = true
+		} else {
+			m.statusMsg = "Saved ✓"
+			m.statusErr = false
+		}
+		// Refresh everything; go back to project view or update list
+		if m.screen == screenEdit {
+			m.screen = screenProjectView
+		}
+		return m, tea.Batch(m.loadTodayNote(), m.loadReminders())
 	}
 
 	// Delegate to the active screen
@@ -682,6 +714,12 @@ func (m Model) viewNoteList() string {
 // --- Screen: Edit ---
 
 func (m Model) enterEditMode(category storage.Category, name string) (tea.Model, tea.Cmd) {
+	if m.externalEditor != "" {
+		// Just launch the external editor. No need to go to screenEdit.
+		path := m.store.NotePath(m.currentProject, category, name)
+		return m, m.launchEditorCmd(path)
+	}
+
 	m.screen = screenEdit
 	m.editCategory = category
 	m.editNoteName = name
@@ -954,6 +992,21 @@ type noteSavedMsg struct {
 
 type projectCreatedMsg struct {
 	err error
+}
+
+type editorFinishedMsg struct{ err error }
+
+func (m Model) launchEditorCmd(path string) tea.Cmd {
+	// If no external editor is configured, we can't launch it.
+	// But in enterEditMode we check this already.
+	if m.externalEditor == "" {
+		return nil
+	}
+
+	c := exec.Command(m.externalEditor, path)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return editorFinishedMsg{err}
+	})
 }
 
 func (m Model) loadProjects() tea.Msg {
