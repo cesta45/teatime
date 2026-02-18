@@ -39,24 +39,29 @@ type Model struct {
 	currentProject string
 
 	// Project view state (menu on the left, today's note on the right)
-	menuCursor int
-	todayNote  string
-	reminders  []storage.Reminder
+	menuCursor        int
+	todayNote         string
+	todayNoteRendered string
+	reminders         []storage.Reminder
 
 	// Note list state
-	noteCategory storage.Category
-	notes        []storage.NoteFile
-	noteCursor   int
-	previewNote  string
+	noteCategory        storage.Category
+	notes               []storage.NoteFile
+	noteCursor          int
+	previewNote         string
+	previewNoteRendered string
+	lastRenderedPreview string
+	lastRenderedWidth   int
 
 	// Edit mode state
-	editTextarea  textarea.Model
-	editCategory  storage.Category
-	editNoteName  string
-	editDirty     bool
-	editRef       string         // reference content from the level below
-	editViewport  viewport.Model // scrollable right pane for reference content
-	editFocusLeft bool           // true = textarea focused, false = viewport focused
+	editTextarea    textarea.Model
+	editCategory    storage.Category
+	editNoteName    string
+	editDirty       bool
+	editRef         string         // reference content from the level below
+	editRefRendered string         // rendered version for the viewport
+	editViewport    viewport.Model // scrollable right pane for reference content
+	editFocusLeft   bool           // true = textarea focused, false = viewport focused
 
 	// Status message (shown briefly)
 	statusMsg string
@@ -113,13 +118,66 @@ func (m Model) Init() tea.Cmd {
 	)
 }
 
+// Layout calculation helpers
+func (m Model) projectViewLayout() (int, int, int) {
+	usableWidth := m.width - 8
+	leftWidth := int(float64(usableWidth) * leftPaneWidthFraction)
+	if leftWidth < minLeftPaneWidth {
+		leftWidth = minLeftPaneWidth
+	}
+	rightWidth := usableWidth - leftWidth - 2
+	if rightWidth < minRightPaneWidth {
+		rightWidth = minRightPaneWidth
+	}
+	paneHeight := m.height - 8
+	if paneHeight < 5 {
+		paneHeight = 5
+	}
+	return leftWidth, rightWidth, paneHeight
+}
+
+func (m Model) editPaneLayout() (int, int, int) {
+	usableWidth := m.width - 10
+	leftWidth := usableWidth / 2
+	if leftWidth < 30 {
+		leftWidth = 30
+	}
+	rightWidth := usableWidth - leftWidth - 2
+	if rightWidth < 20 {
+		rightWidth = 20
+	}
+	paneHeight := m.height - 11
+	if paneHeight < 5 {
+		paneHeight = 5
+	}
+	return leftWidth, rightWidth, paneHeight
+}
+
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		return m, nil
+		// Trigger re-rendering of whatever is currently shown if the width changed
+		var cmds []tea.Cmd
+		switch m.screen {
+		case screenProjectView:
+			_, rw, _ := m.projectViewLayout()
+			m.todayNoteRendered = "" // Force "Rendering..." while re-rendering
+			cmds = append(cmds, m.renderMarkdownCmd(m.todayNote, rw-4, "today"))
+		case screenNoteList:
+			_, rw, _ := m.projectViewLayout()
+			m.previewNoteRendered = ""
+			cmds = append(cmds, m.renderMarkdownCmd(m.previewNote, rw-4, "preview"))
+		case screenEdit:
+			if m.editCategory != storage.CategoryDaily {
+				_, rw, _ := m.editPaneLayout()
+				m.editRefRendered = ""
+				cmds = append(cmds, m.renderMarkdownCmd(m.editRef, rw-4, "edit"))
+			}
+		}
+		return m, tea.Batch(cmds...)
 
 	case projectsLoadedMsg:
 		m.projects = msg.projects
@@ -141,32 +199,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.editRef = msg.content
 		}
-		// Size and populate the viewport
-		// paneH = m.height - 11 (see enterEditMode for full derivation)
-		// .Width(w) includes padding, so content width = w - 4
-		// .Height(h) includes padding, so content height = h - 2
-		// Inside content: header(1) + viewport
-		usableWidth := m.width - 10
-		leftWidth := usableWidth / 2
-		if leftWidth < 30 {
-			leftWidth = 30
-		}
-		rightWidth := usableWidth - leftWidth - 2
-		// Subtract horizontal padding (2+2) so viewport fits inside pane content area
-		vpWidth := rightWidth - 4
+		_, rw, ph := m.editPaneLayout()
+		vpWidth := rw - 4
 		if vpWidth < 20 {
 			vpWidth = 20
 		}
-		paneH := m.height - 11
-		if paneH < 7 {
-			paneH = 7
-		}
-		vpHeight := paneH - 3 // subtract vertical padding (2) + header (1)
+		vpHeight := ph - 3
 		if vpHeight < 3 {
 			vpHeight = 3
 		}
 		m.editViewport = viewport.New(vpWidth, vpHeight)
-		m.editViewport.SetContent(m.editRef)
+		m.editRefRendered = ""
+		return m, m.renderMarkdownCmd(m.editRef, vpWidth, "edit")
+
+	case markdownRenderedMsg:
+		switch msg.target {
+		case "today":
+			m.todayNoteRendered = msg.content
+		case "preview":
+			m.previewNoteRendered = msg.content
+		case "edit":
+			m.editRefRendered = msg.content
+			m.editViewport.SetContent(m.editRefRendered)
+		}
 		return m, nil
 
 	case noteLoadedMsg:
@@ -177,8 +232,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.target {
 			case "today":
 				m.todayNote = msg.content
+				_, rw, _ := m.projectViewLayout()
+				m.todayNoteRendered = ""
+				return m, m.renderMarkdownCmd(m.todayNote, rw-4, "today")
 			case "preview":
 				m.previewNote = msg.content
+				_, rw, _ := m.projectViewLayout()
+				m.previewNoteRendered = ""
+				return m, m.renderMarkdownCmd(m.previewNote, rw-4, "preview")
 			case "edit":
 				m.editTextarea.SetValue(msg.content)
 				m.editDirty = false
@@ -194,6 +255,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notes = msg.notes
 			m.noteCursor = 0
 			m.previewNote = ""
+			m.previewNoteRendered = ""
 			if len(m.notes) > 0 {
 				return m, m.loadNoteContent(m.currentProject, m.noteCategory, m.notes[0].Name, "preview")
 			}
@@ -428,22 +490,7 @@ func (m Model) handleMenuSelect() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) viewProjectView() string {
-	// Calculate pane widths
-	usableWidth := m.width - 8 // account for padding, borders
-	leftWidth := int(float64(usableWidth) * leftPaneWidthFraction)
-	if leftWidth < minLeftPaneWidth {
-		leftWidth = minLeftPaneWidth
-	}
-	rightWidth := usableWidth - leftWidth - 2
-	if rightWidth < minRightPaneWidth {
-		rightWidth = minRightPaneWidth
-	}
-
-	// Calculate pane heights
-	paneHeight := m.height - 8 // account for padding, title, help bar
-	if paneHeight < 5 {
-		paneHeight = 5
-	}
+	leftWidth, rightWidth, paneHeight := m.projectViewLayout()
 
 	// Left pane: menu
 	leftContent := headerStyle.Render(m.currentProject) + "\n\n"
@@ -481,8 +528,10 @@ func (m Model) viewProjectView() string {
 	rightContent := previewHeaderStyle.Render("📅 "+storage.TodayName()) + "\n\n"
 	if m.todayNote == "" {
 		rightContent += mutedStyle.Render("No entry for today yet.\nPress [e] to start writing.")
+	} else if m.todayNoteRendered == "" {
+		rightContent += mutedStyle.Render("Rendering...")
 	} else {
-		rightContent += m.todayNote
+		rightContent += m.todayNoteRendered
 	}
 
 	rightPane := rightPaneStyle.
@@ -565,21 +614,7 @@ func (m Model) updateNoteList(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) viewNoteList() string {
-	// Calculate pane widths
-	usableWidth := m.width - 8
-	leftWidth := int(float64(usableWidth) * leftPaneWidthFraction)
-	if leftWidth < minLeftPaneWidth {
-		leftWidth = minLeftPaneWidth
-	}
-	rightWidth := usableWidth - leftWidth - 2
-	if rightWidth < minRightPaneWidth {
-		rightWidth = minRightPaneWidth
-	}
-
-	paneHeight := m.height - 8
-	if paneHeight < 5 {
-		paneHeight = 5
-	}
+	leftWidth, rightWidth, paneHeight := m.projectViewLayout()
 
 	// Left pane: note list
 	leftContent := headerStyle.Render(storage.CategoryLabel(m.noteCategory)) + "\n\n"
@@ -606,8 +641,10 @@ func (m Model) viewNoteList() string {
 		rightContent += previewHeaderStyle.Render("📄 "+m.notes[m.noteCursor].Name) + "\n\n"
 		if m.previewNote == "" {
 			rightContent += mutedStyle.Render("(empty)")
+		} else if m.previewNoteRendered == "" {
+			rightContent += mutedStyle.Render("Rendering...")
 		} else {
-			rightContent += m.previewNote
+			rightContent += m.previewNoteRendered
 		}
 	} else {
 		rightContent += mutedStyle.Render("Select a note to preview")
@@ -684,11 +721,7 @@ func (m Model) enterEditMode(category storage.Category, name string) (tea.Model,
 	// Size the textarea
 	if hasSplitPane {
 		// Split layout: textarea on the left
-		usableWidth := m.width - 10
-		leftWidth := usableWidth / 2
-		if leftWidth < 30 {
-			leftWidth = 30
-		}
+		leftWidth, _, _ := m.editPaneLayout()
 		// Subtract horizontal padding (2+2) so textarea fits inside pane content area
 		taWidth := leftWidth - 4
 		if taWidth < 20 {
@@ -706,11 +739,8 @@ func (m Model) enterEditMode(category storage.Category, name string) (tea.Model,
 
 	var taHeight int
 	if hasSplitPane {
-		paneH := m.height - 11
-		if paneH < 7 {
-			paneH = 7
-		}
-		taHeight = paneH - 3 // subtract vertical padding (2) + header (1)
+		_, _, ph := m.editPaneLayout()
+		taHeight = ph - 3 // subtract vertical padding (2) + header (1)
 	} else {
 		taHeight = m.height - 8 // no pane border/padding in full-width mode
 	}
@@ -787,19 +817,7 @@ func (m Model) viewEdit() string {
 	var body string
 	if hasSplitPane && m.editRef != "" {
 		// Split layout: editor on left, reference on right
-		usableWidth := m.width - 10
-		leftWidth := usableWidth / 2
-		if leftWidth < 30 {
-			leftWidth = 30
-		}
-		rightWidth := usableWidth - leftWidth - 2
-		if rightWidth < 20 {
-			rightWidth = 20
-		}
-		paneHeight := m.height - 11 // paneH: total layout = paneH + 9 + appPad(2) = m.height
-		if paneHeight < 5 {
-			paneHeight = 5
-		}
+		leftWidth, rightWidth, paneHeight := m.editPaneLayout()
 
 		// Left pane: editor
 		var leftPane string
@@ -913,9 +931,21 @@ type refContentLoadedMsg struct {
 	err     error
 }
 
+type markdownRenderedMsg struct {
+	content string
+	target  string // "today", "preview", or "edit"
+}
+
 type notesListedMsg struct {
 	notes []storage.NoteFile
 	err   error
+}
+
+func (m Model) renderMarkdownCmd(content string, width int, target string) tea.Cmd {
+	return func() tea.Msg {
+		rendered := renderMarkdown(width, content)
+		return markdownRenderedMsg{content: rendered, target: target}
+	}
 }
 
 type noteSavedMsg struct {

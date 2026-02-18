@@ -1,6 +1,35 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// renderMarkdown renders markdown content using glamour.
+func renderMarkdown(width int, content string) string {
+	if content == "" {
+		return ""
+	}
+
+	// Use a fixed style to avoid slow terminal background detection.
+	// We use "dark" as a sensible default for TUI applications.
+	r, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(width),
+	)
+	if err != nil {
+		return content
+	}
+
+	out, err := r.Render(content)
+	if err != nil {
+		return content
+	}
+
+	return strings.TrimSpace(out)
+}
 
 // Colors
 var (
