@@ -27,7 +27,7 @@ Summary files (weekly, monthly, quarterly, yearly) are **user-written**. The spl
 ### From source
 
 ```sh
-git clone https://github.com/gabrielfornes/teatime.git
+git clone https://github.com/cesta45/teatime.git
 cd teatime
 go build -o teatime .
 ```
