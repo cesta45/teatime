@@ -1,6 +1,6 @@
 # 🍵 teatime
 
-A terminal-based time-tracking journal built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea). Write daily work notes as markdown files, then distill them into weekly, monthly, quarterly, and yearly summaries.
+A terminal-based time-tracking journal built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea). Write daily work notes as markdown files, then distill them into weekly, monthly, quarterly, and yearly summaries. Made entirely with the use of AI.
 
 ![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
