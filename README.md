@@ -14,6 +14,8 @@ Summary files (weekly, monthly, quarterly, yearly) are **user-written**. The spl
 ## Features
 
 - **Multi-project support** — track work across as many projects as you need
+- **Markdown Previews** — high-performance, syntax-highlighted previews of your notes
+- **External Editor Support** — use your favorite IDE (like Helix or Vim) for a full-featured writing experience
 - **Daily notes** — full-width editor for today's entry
 - **Hierarchical summaries** — weekly, monthly, quarterly, and yearly summary files
 - **Split-pane editor** — write summaries with reference entries visible alongside
@@ -53,6 +55,25 @@ teatime
 ```
 
 The app opens in an alternate screen. Create a project, then start journaling.
+
+## Configuration
+
+### External Editor
+
+Teatime allows you to use an external editor (like Helix or Vim) for a full-featured writing experience. It checks for the following environment variables (in order):
+
+1. `TEATIME_EDITOR`
+2. `EDITOR`
+
+If neither is set, it will attempt to use `hx` (Helix) if it is available in your `PATH`. If no external editor is found, it falls back to the built-in TUI editor.
+
+```bash
+# Example: Use Helix
+export TEATIME_EDITOR=hx
+
+# Example: Use Vim
+export TEATIME_EDITOR=vim
+```
 
 ### Typical workflow
 
@@ -165,6 +186,7 @@ When editing a summary, the reference pane shows the entries from the level belo
 | TUI framework | [Bubble Tea](https://github.com/charmbracelet/bubbletea) |
 | Text input | [Bubbles](https://github.com/charmbracelet/bubbles) (textarea, viewport) |
 | Styling | [Lip Gloss](https://github.com/charmbracelet/lipgloss) |
+| Markdown Rendering | [Glamour](https://github.com/charmbracelet/glamour) |
 | Storage | Plain markdown files on disk |
 
 ## Project Structure
